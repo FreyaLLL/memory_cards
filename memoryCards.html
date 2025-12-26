@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>记忆卡片</title>
+
+<style>
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #f5f7fa;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+#tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 12px 16px;
+}
+
+#progress {
+    padding: 10px 16px;
+    font-size: 18px;
+    text-align: center;
+}
+
+.card {
+    flex: 1;
+    margin: 20px;
+    background: #fff;
+    border-radius: 20px;
+    border: 4px solid #1565c0;
+    box-shadow: 0 10px 30px rgba(0,0,0,.08);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    font-weight: 700;
+    text-align: center;
+    padding: 32px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+}
+
+.card.back {
+    border-color: #999;
+}
+
+.card .group {
+    font-size: 18px;
+    font-weight: 500;
+    margin-bottom: 12px;
+    color: #666;
+}
+
+#buttons {
+    display: flex;
+    justify-content: space-around;
+    padding: 12px 16px;
+}
+
+.btn {
+    flex: 1;
+    margin: 0 8px;
+    height: 64px;
+    border-radius: 16px;
+    border: none;
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+}
+
+.btn.easy   { background: #43a047; }
+.btn.medium { background: #757575; }
+.btn.forget { background: #e53935; }
+</style>
+</head>
+
+<body>
+
+<div id="tags"></div>
+<div id="progress">加载中…</div>
+
+<div class="card" id="card">
+    <div class="group" id="card-group"></div>
+    <div id="card-content">加载中…</div>
+</div>
+
+<div id="buttons">
+    <button class="btn easy" onclick="mark('简单')">简单</button>
+    <button class="btn medium" onclick="mark('一般')">一般</button>
+    <button class="btn forget" onclick="mark('忘记')">忘记</button>
+</div>
+
+<script>
+const CSV_URL = 'https://raw.githubusercontent.com/FreyaLLL/memory_cards/main/cards.csv';
+
+let cards = [];
+let current = null;
+let showBack = false;
+let currentTag = 'ALL';
+let progress = { done: 0, total: 0 };
+
+const tagsEl = document.getElementById('tags');
+const cardEl = document.getElementById('card');
+const groupEl = document.getElementById('card-group');
+const contentEl = document.getElementById('card-content');
+const progressEl = document.getElementById('progress');
+
+/* ---------- CSV 解析（防止逗号错位） ---------- */
+function parseLine(line) {
+    const parts = line.split(',');
+    if (parts.length < 6) return null;
+
+    const id = parts[0];
+    const front = parts[1]?.trim();
+    const back = parts[2]?.trim();
+    const tag = parts[3]?.trim();
+    const level = parts[4]?.trim() || 'new';
+    const group = parts.slice(5).join(',').trim();
+
+    if (!front || !back) return null;
+
+    return { id, front, back, tag, level, group, done: false };
+}
+
+/* ---------- 读取数据 ---------- */
+fetch(CSV_URL)
+.then(res => res.text())
+.then(text => {
+    const lines = text.trim().split('\n').slice(1);
+    cards = lines.map(parseLine).filter(Boolean);
+
+    progress.total = cards.length;
+    initTags();
+    nextCard();
+});
+
+/* ---------- 顶部 tags ---------- */
+function initTags() {
+    tagsEl.innerHTML = '';
+    const tagSet = new Set();
+
+    // 1. CSV tag 字段
+    cards.forEach(c => {
+        if (c.tag) tagSet.add(c.tag);
+    });
+
+    // 2. 组卡
+    if (cards.some(c => c.group && c.front)) {
+        tagSet.add('组卡');
+    }
+
+    // 3. new
+    if (cards.some(c => c.level === 'new')) {
+        tagSet.add('new');
+    }
+
+    addTagButton('ALL', '全部');
+    [...tagSet].forEach(t => addTagButton(t, t));
+}
+
+function addTagButton(value, label) {
+    const btn = document.createElement('button');
+    btn.innerText = label;
+    btn.style.cssText = `
+        padding:6px 14px;
+        border-radius:14px;
+        border:none;
+        font-weight:700;
+        background:${value === currentTag ? '#1565c0' : '#e3f2fd'};
+        color:${value === currentTag ? '#fff' : '#1565c0'};
+    `;
+    btn.onclick = () => {
+        currentTag = value;
+        initTags();
+        nextCard();
+    };
+    tagsEl.appendChild(btn);
+}
+
+/* ---------- tag 匹配规则 ---------- */
+function matchTag(card) {
+    if (currentTag === 'ALL') return true;
+    if (currentTag === '组卡') return card.group && card.front;
+    if (currentTag === 'new') return card.level === 'new';
+    return card.tag === currentTag;
+}
+
+/* ---------- 卡片行为 ---------- */
+cardEl.addEventListener('click', () => {
+    if (!current) return;
+    showBack = !showBack;
+    cardEl.classList.toggle('back', showBack);
+    contentEl.innerText = showBack ? current.back : current.front;
+});
+
+function nextCard() {
+    const pool = cards.filter(c => !c.done && matchTag(c));
+
+    if (!pool.length) {
+        contentEl.innerText = '完成一轮！你真的很棒 🎉';
+        groupEl.innerText = '';
+        cardEl.classList.remove('back');
+        updateProgress();
+        return;
+    }
+
+    current = pool[Math.floor(Math.random() * pool.length)];
+    showBack = false;
+    cardEl.classList.remove('back');
+    contentEl.innerText = current.front;
+    groupEl.innerText = current.group ? `组：${current.group}` : '';
+    updateProgress();
+}
+
+/* ---------- 标记 ---------- */
+function mark(level) {
+    if (!current) return;
+    current.level = level;
+    current.done = true;
+    progress.done += 1;
+    nextCard();
+}
+
+function updateProgress() {
+    const remaining = cards.filter(c => !c.done && matchTag(c)).length;
+    progressEl.innerText =
+        `已完成 ${progress.done} / ${progress.total} ｜ 剩余 ${remaining}`;
+}
+</script>
+
+</body>
+</html>
