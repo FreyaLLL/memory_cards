@@ -1,14 +1,13 @@
-# Excel / WPS 临时文件
+# ===== Office / WPS 临时文件 =====
 .~*
 *.tmp
 
-# Office 文档
-*.docx
+# ===== 非版本化的数据源 =====
 *.xlsx
+*.docx
 
-# 备份文件
+# ===== 自动生成的备份 =====
 backups/
 
-# macOS
+# ===== macOS =====
 .DS_Store
-
