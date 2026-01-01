@@ -14,64 +14,25 @@ body {
     flex-direction: column;
     min-height: 100vh;
 }
-
-#tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 16px;
-}
-
-#progress {
-    padding: 10px 16px;
-    font-size: 18px;
-    text-align: center;
-}
-
+#tags { display:flex; flex-wrap:wrap; gap:8px; padding:12px 16px; }
+#progress { padding:10px 16px; font-size:18px; text-align:center; }
 .card {
-    flex: 1;
-    margin: 20px;
-    background: #fff;
-    border-radius: 20px;
-    border: 4px solid #1565c0;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    font-size: 34px;
-    font-weight: 700;
-    text-align: center;
-    padding: 32px;
-    cursor: pointer;
+    flex:1; margin:20px; background:#fff; border-radius:20px;
+    border:4px solid #1565c0;
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    font-size:34px; font-weight:700; text-align:center; padding:32px; cursor:pointer;
 }
-
 .card.back { border-color:#999; }
-
-.group {
-    font-size: 16px;
-    color: #666;
-    margin-bottom: 12px;
-}
-
-#buttons {
-    display: flex;
-    gap: 12px;
-    padding: 12px;
-}
-
+.group { font-size:16px; color:#666; margin-bottom:12px; }
+#buttons { display:flex; gap:12px; padding:12px; }
 .btn {
-    flex: 1;
-    height: 64px;
-    border-radius: 16px;
-    border: none;
-    font-size: 22px;
-    font-weight: 700;
-    color: #fff;
+    flex:1; height:64px; border-radius:16px; border:none;
+    font-size:22px; font-weight:700; color:#fff;
 }
-
-.easy   { background:#43a047 }
-.medium { background:#757575 }
-.forget { background:#e53935 }
+.easy{background:#43a047}
+.medium{background:#757575}
+.forget{background:#e53935}
+.export{background:#1565c0}
 </style>
 </head>
 
@@ -86,22 +47,32 @@ body {
 </div>
 
 <div id="buttons">
-    <button class="btn easy" onclick="mark()">简单</button>
-    <button class="btn medium" onclick="mark()">一般</button>
-    <button class="btn forget" onclick="mark()">忘记</button>
+    <button class="btn easy" onclick="mark('easy')">简单</button>
+    <button class="btn medium" onclick="mark('medium')">一般</button>
+    <button class="btn forget" onclick="mark('forget')">忘记</button>
+</div>
+
+<div id="buttons">
+    <button class="btn export" onclick="exportLogs()">导出日志 CSV</button>
 </div>
 
 <script>
 const CSV_URL =
   'https://raw.githubusercontent.com/FreyaLLL/memory_cards/refs/heads/main/cards.csv';
 
+/* ===== 状态 ===== */
 let cards = [];
 let current = null;
 let showBack = false;
 let currentTag = 'ALL';
 let done = 0;
+let round = 1;
 
-/* ===== 组卡状态 ===== */
+/* ===== 日志 ===== */
+let logs = JSON.parse(localStorage.getItem('memory_logs') || '[]');
+let cardStartTime = 0;
+
+/* ===== 组卡 ===== */
 let groupQueue = [];
 let currentGroup = null;
 
@@ -112,127 +83,160 @@ const groupEl = document.getElementById('group');
 const progressEl = document.getElementById('progress');
 
 /* ===== CSV 解析 ===== */
-function parseCSV(text) {
-    const rows = [];
-    let row = [], field = '', inQuotes = false;
-
-    for (let i = 0; i < text.length; i++) {
-        const c = text[i], n = text[i+1];
-        if (c === '"' && inQuotes && n === '"') { field += '"'; i++; }
-        else if (c === '"') inQuotes = !inQuotes;
-        else if (c === ',' && !inQuotes) { row.push(field); field=''; }
-        else if ((c === '\n' || c === '\r') && !inQuotes) {
-            if (field || row.length) row.push(field);
-            if (row.length) rows.push(row);
-            row=[]; field='';
-        } else field += c;
+function parseCSV(text){
+    const rows=[]; let row=[],field='',q=false;
+    for(let i=0;i<text.length;i++){
+        const c=text[i],n=text[i+1];
+        if(c=='"'&&q&&n=='"'){field+='"';i++}
+        else if(c=='"')q=!q
+        else if(c==','&&!q){row.push(field);field=''}
+        else if((c=='\n'||c=='\r')&&!q){
+            if(field||row.length)row.push(field);
+            if(row.length)rows.push(row);
+            row=[];field='';
+        } else field+=c;
     }
-    if (field || row.length) { row.push(field); rows.push(row); }
+    if(field||row.length){row.push(field);rows.push(row)}
     return rows;
 }
 
-/* ===== 加载数据 ===== */
-fetch(CSV_URL)
-.then(r => r.text())
-.then(text => {
-    const rows = parseCSV(text).slice(1);
-    cards = rows.map(r => {
-        const [id, front, back, tag, level, group] = r.map(v => (v||'').trim());
-        if (!front || !back) return null;
-        return { id, front, back, tag, level:level||'new', group, done:false };
+/* ===== 加载 ===== */
+fetch(CSV_URL).then(r=>r.text()).then(t=>{
+    cards=parseCSV(t).slice(1).map(r=>{
+        const [id,front,back,tag,level,group]=r.map(v=>(v||'').trim());
+        if(!front||!back)return null;
+        return {id,front,back,tag,level,group,done:false};
     }).filter(Boolean);
-
     initTags();
     nextCard();
 });
 
 /* ===== tags ===== */
-function initTags() {
-    tagsEl.innerHTML = '';
-    const set = new Set();
-    cards.forEach(c => {
-        if (c.tag) set.add(c.tag);
-        if (c.group) set.add('组卡');
-        if (c.level === 'new') set.add('new');
+function initTags(){
+    tagsEl.innerHTML='';
+    const s=new Set();
+    cards.forEach(c=>{
+        if(c.tag)s.add(c.tag);
+        if(c.group)s.add('组卡');
+        if(c.level==='new')s.add('new');
     });
     addTag('ALL','全部');
-    [...set].forEach(t => addTag(t,t));
+    [...s].forEach(t=>addTag(t,t));
 }
-
-function addTag(val,label){
+function addTag(v,l){
     const b=document.createElement('button');
-    b.textContent=label;
+    b.textContent=l;
     b.style.cssText=`
-      padding:6px 14px;border-radius:14px;border:none;
-      font-weight:700;
-      background:${val===currentTag?'#1565c0':'#e3f2fd'};
-      color:${val===currentTag?'#fff':'#1565c0'};
+      padding:6px 14px;border-radius:14px;border:none;font-weight:700;
+      background:${v===currentTag?'#1565c0':'#e3f2fd'};
+      color:${v===currentTag?'#fff':'#1565c0'};
     `;
-    b.onclick=()=>{
-        currentTag=val;
-        groupQueue=[];
-        currentGroup=null;
-        initTags();
-        nextCard();
-    };
+    b.onclick=()=>{currentTag=v; resetRound(); initTags(); nextCard();};
     tagsEl.appendChild(b);
 }
 
 /* ===== 卡片 ===== */
 cardEl.onclick=()=>{
-    if(!current) return;
+    if(!current)return;
     showBack=!showBack;
     contentEl.textContent=showBack?current.back:current.front;
     cardEl.classList.toggle('back',showBack);
 };
 
-function nextCard() {
-    /* ===== 组卡模式 ===== */
-    if (currentTag === '组卡') {
-        if (!groupQueue.length) {
-            const groups = [...new Set(
-                cards.filter(c => !c.done && c.group).map(c => c.group)
-            )];
-            if (!groups.length) return finish();
-            currentGroup = groups[Math.floor(Math.random()*groups.length)];
-            groupQueue = cards.filter(c => !c.done && c.group === currentGroup);
+function nextCard(){
+    if(currentTag==='组卡'){
+        if(!groupQueue.length){
+            const gs=[...new Set(cards.filter(c=>!c.done&&c.group).map(c=>c.group))];
+            if(!gs.length)return finishRound();
+            currentGroup=gs[Math.floor(Math.random()*gs.length)];
+            groupQueue=cards.filter(c=>!c.done&&c.group===currentGroup);
         }
-        current = groupQueue.shift();
-    } 
-    /* ===== 普通模式 ===== */
-    else {
-        const pool = cards.filter(c => !c.done &&
-            (currentTag==='ALL' ||
-             (currentTag==='new' && c.level==='new') ||
-             c.tag===currentTag)
-        );
-        if (!pool.length) return finish();
-        current = pool[Math.floor(Math.random()*pool.length)];
+        current=groupQueue.shift();
+    } else {
+        const pool=cards.filter(c=>!c.done&&(
+            currentTag==='ALL'||
+            (currentTag==='new'&&c.level==='new')||
+            c.tag===currentTag
+        ));
+        if(!pool.length)return finishRound();
+        current=pool[Math.floor(Math.random()*pool.length)];
     }
 
     showBack=false;
     cardEl.classList.remove('back');
     contentEl.textContent=current.front;
     groupEl.textContent=current.group?`组：${current.group}`:'';
+    cardStartTime=Date.now();
     updateProgress();
 }
 
-function mark(){
-    if(!current) return;
+/* ===== 记录日志 ===== */
+function mark(result){
+    if(!current)return;
+
+    const time=(Date.now()-cardStartTime)/1000;
+
+    logs.push({
+        card_id: current.id,
+        result,
+        time: Number(time.toFixed(2))
+    });
+
+    localStorage.setItem('memory_logs', JSON.stringify(logs));
+
     current.done=true;
     done++;
     nextCard();
 }
 
-function finish(){
+/* ===== 导出日志 CSV（最终封版） ===== */
+function exportLogs(){
+    if(!logs.length){
+        alert('暂无日志');
+        return;
+    }
+
+    let csv = 'card_id,result,time\n';
+    logs.forEach(l=>{
+        csv += `${l.card_id},${l.result},${l.time}\n`;
+    });
+
+    // ⭐ 日期文件名
+    const dateStr = new Date().toISOString().slice(0,10);
+
+    const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `logs_${dateStr}.csv`;
+    a.click();
+
+    URL.revokeObjectURL(url);
+}
+
+/* ===== 轮次 ===== */
+function finishRound(){
     contentEl.textContent='完成一轮 🎉';
     groupEl.textContent='';
     updateProgress();
+    setTimeout(()=>{
+        round++;
+        resetRound();
+        nextCard();
+    },800);
+}
+function resetRound(){
+    cards.forEach(c=>c.done=false);
+    done=0;
+    groupQueue=[];
+    currentGroup=null;
 }
 
+/* ===== 进度 ===== */
 function updateProgress(){
-    const left = cards.filter(c=>!c.done).length;
-    progressEl.textContent=`已完成 ${done} / ${cards.length} ｜ 剩余 ${left}`;
+    const left=cards.filter(c=>!c.done).length;
+    progressEl.textContent=`第 ${round} 轮 ｜ 已完成 ${done}/${cards.length} ｜ 剩余 ${left}`;
 }
 </script>
 
