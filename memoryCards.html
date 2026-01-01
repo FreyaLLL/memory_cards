@@ -34,39 +34,33 @@ body {
     background: #fff;
     border-radius: 20px;
     border: 4px solid #1565c0;
-    box-shadow: 0 10px 30px rgba(0,0,0,.08);
     display: flex;
     flex-direction: column;
-    align-items: center;
     justify-content: center;
-    font-size: 36px;
+    align-items: center;
+    font-size: 34px;
     font-weight: 700;
     text-align: center;
     padding: 32px;
     cursor: pointer;
-    transition: border-color 0.2s;
 }
 
-.card.back {
-    border-color: #999;
-}
+.card.back { border-color:#999; }
 
-.card .group {
-    font-size: 18px;
-    font-weight: 500;
-    margin-bottom: 12px;
+.group {
+    font-size: 16px;
     color: #666;
+    margin-bottom: 12px;
 }
 
 #buttons {
     display: flex;
-    justify-content: space-around;
-    padding: 12px 16px;
+    gap: 12px;
+    padding: 12px;
 }
 
 .btn {
     flex: 1;
-    margin: 0 8px;
     height: 64px;
     border-radius: 16px;
     border: none;
@@ -75,9 +69,9 @@ body {
     color: #fff;
 }
 
-.btn.easy   { background: #43a047; }
-.btn.medium { background: #757575; }
-.btn.forget { background: #e53935; }
+.easy   { background:#43a047 }
+.medium { background:#757575 }
+.forget { background:#e53935 }
 </style>
 </head>
 
@@ -87,151 +81,158 @@ body {
 <div id="progress">加载中…</div>
 
 <div class="card" id="card">
-    <div class="group" id="card-group"></div>
-    <div id="card-content">加载中…</div>
+    <div class="group" id="group"></div>
+    <div id="content">加载中…</div>
 </div>
 
 <div id="buttons">
-    <button class="btn easy" onclick="mark('简单')">简单</button>
-    <button class="btn medium" onclick="mark('一般')">一般</button>
-    <button class="btn forget" onclick="mark('忘记')">忘记</button>
+    <button class="btn easy" onclick="mark()">简单</button>
+    <button class="btn medium" onclick="mark()">一般</button>
+    <button class="btn forget" onclick="mark()">忘记</button>
 </div>
 
 <script>
-const CSV_URL = 'https://raw.githubusercontent.com/FreyaLLL/memory_cards/main/cards.csv';
+const CSV_URL =
+  'https://raw.githubusercontent.com/FreyaLLL/memory_cards/refs/heads/main/cards.csv';
 
 let cards = [];
 let current = null;
 let showBack = false;
 let currentTag = 'ALL';
-let progress = { done: 0, total: 0 };
+let done = 0;
+
+/* ===== 组卡状态 ===== */
+let groupQueue = [];
+let currentGroup = null;
 
 const tagsEl = document.getElementById('tags');
 const cardEl = document.getElementById('card');
-const groupEl = document.getElementById('card-group');
-const contentEl = document.getElementById('card-content');
+const contentEl = document.getElementById('content');
+const groupEl = document.getElementById('group');
 const progressEl = document.getElementById('progress');
 
-/* ---------- CSV 解析（防止逗号错位） ---------- */
-function parseLine(line) {
-    const parts = line.split(',');
-    if (parts.length < 6) return null;
+/* ===== CSV 解析 ===== */
+function parseCSV(text) {
+    const rows = [];
+    let row = [], field = '', inQuotes = false;
 
-    const id = parts[0];
-    const front = parts[1]?.trim();
-    const back = parts[2]?.trim();
-    const tag = parts[3]?.trim();
-    const level = parts[4]?.trim() || 'new';
-    const group = parts.slice(5).join(',').trim();
-
-    if (!front || !back) return null;
-
-    return { id, front, back, tag, level, group, done: false };
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i], n = text[i+1];
+        if (c === '"' && inQuotes && n === '"') { field += '"'; i++; }
+        else if (c === '"') inQuotes = !inQuotes;
+        else if (c === ',' && !inQuotes) { row.push(field); field=''; }
+        else if ((c === '\n' || c === '\r') && !inQuotes) {
+            if (field || row.length) row.push(field);
+            if (row.length) rows.push(row);
+            row=[]; field='';
+        } else field += c;
+    }
+    if (field || row.length) { row.push(field); rows.push(row); }
+    return rows;
 }
 
-/* ---------- 读取数据 ---------- */
+/* ===== 加载数据 ===== */
 fetch(CSV_URL)
-.then(res => res.text())
+.then(r => r.text())
 .then(text => {
-    const lines = text.trim().split('\n').slice(1);
-    cards = lines.map(parseLine).filter(Boolean);
+    const rows = parseCSV(text).slice(1);
+    cards = rows.map(r => {
+        const [id, front, back, tag, level, group] = r.map(v => (v||'').trim());
+        if (!front || !back) return null;
+        return { id, front, back, tag, level:level||'new', group, done:false };
+    }).filter(Boolean);
 
-    progress.total = cards.length;
     initTags();
     nextCard();
 });
 
-/* ---------- 顶部 tags ---------- */
+/* ===== tags ===== */
 function initTags() {
     tagsEl.innerHTML = '';
-    const tagSet = new Set();
-
-    // 1. CSV tag 字段
+    const set = new Set();
     cards.forEach(c => {
-        if (c.tag) tagSet.add(c.tag);
+        if (c.tag) set.add(c.tag);
+        if (c.group) set.add('组卡');
+        if (c.level === 'new') set.add('new');
     });
-
-    // 2. 组卡
-    if (cards.some(c => c.group && c.front)) {
-        tagSet.add('组卡');
-    }
-
-    // 3. new
-    if (cards.some(c => c.level === 'new')) {
-        tagSet.add('new');
-    }
-
-    addTagButton('ALL', '全部');
-    [...tagSet].forEach(t => addTagButton(t, t));
+    addTag('ALL','全部');
+    [...set].forEach(t => addTag(t,t));
 }
 
-function addTagButton(value, label) {
-    const btn = document.createElement('button');
-    btn.innerText = label;
-    btn.style.cssText = `
-        padding:6px 14px;
-        border-radius:14px;
-        border:none;
-        font-weight:700;
-        background:${value === currentTag ? '#1565c0' : '#e3f2fd'};
-        color:${value === currentTag ? '#fff' : '#1565c0'};
+function addTag(val,label){
+    const b=document.createElement('button');
+    b.textContent=label;
+    b.style.cssText=`
+      padding:6px 14px;border-radius:14px;border:none;
+      font-weight:700;
+      background:${val===currentTag?'#1565c0':'#e3f2fd'};
+      color:${val===currentTag?'#fff':'#1565c0'};
     `;
-    btn.onclick = () => {
-        currentTag = value;
+    b.onclick=()=>{
+        currentTag=val;
+        groupQueue=[];
+        currentGroup=null;
         initTags();
         nextCard();
     };
-    tagsEl.appendChild(btn);
+    tagsEl.appendChild(b);
 }
 
-/* ---------- tag 匹配规则 ---------- */
-function matchTag(card) {
-    if (currentTag === 'ALL') return true;
-    if (currentTag === '组卡') return card.group && card.front;
-    if (currentTag === 'new') return card.level === 'new';
-    return card.tag === currentTag;
-}
-
-/* ---------- 卡片行为 ---------- */
-cardEl.addEventListener('click', () => {
-    if (!current) return;
-    showBack = !showBack;
-    cardEl.classList.toggle('back', showBack);
-    contentEl.innerText = showBack ? current.back : current.front;
-});
+/* ===== 卡片 ===== */
+cardEl.onclick=()=>{
+    if(!current) return;
+    showBack=!showBack;
+    contentEl.textContent=showBack?current.back:current.front;
+    cardEl.classList.toggle('back',showBack);
+};
 
 function nextCard() {
-    const pool = cards.filter(c => !c.done && matchTag(c));
-
-    if (!pool.length) {
-        contentEl.innerText = '完成一轮！你真的很棒 🎉';
-        groupEl.innerText = '';
-        cardEl.classList.remove('back');
-        updateProgress();
-        return;
+    /* ===== 组卡模式 ===== */
+    if (currentTag === '组卡') {
+        if (!groupQueue.length) {
+            const groups = [...new Set(
+                cards.filter(c => !c.done && c.group).map(c => c.group)
+            )];
+            if (!groups.length) return finish();
+            currentGroup = groups[Math.floor(Math.random()*groups.length)];
+            groupQueue = cards.filter(c => !c.done && c.group === currentGroup);
+        }
+        current = groupQueue.shift();
+    } 
+    /* ===== 普通模式 ===== */
+    else {
+        const pool = cards.filter(c => !c.done &&
+            (currentTag==='ALL' ||
+             (currentTag==='new' && c.level==='new') ||
+             c.tag===currentTag)
+        );
+        if (!pool.length) return finish();
+        current = pool[Math.floor(Math.random()*pool.length)];
     }
 
-    current = pool[Math.floor(Math.random() * pool.length)];
-    showBack = false;
+    showBack=false;
     cardEl.classList.remove('back');
-    contentEl.innerText = current.front;
-    groupEl.innerText = current.group ? `组：${current.group}` : '';
+    contentEl.textContent=current.front;
+    groupEl.textContent=current.group?`组：${current.group}`:'';
     updateProgress();
 }
 
-/* ---------- 标记 ---------- */
-function mark(level) {
-    if (!current) return;
-    current.level = level;
-    current.done = true;
-    progress.done += 1;
+function mark(){
+    if(!current) return;
+    current.done=true;
+    done++;
     nextCard();
 }
 
-function updateProgress() {
-    const remaining = cards.filter(c => !c.done && matchTag(c)).length;
-    progressEl.innerText =
-        `已完成 ${progress.done} / ${progress.total} ｜ 剩余 ${remaining}`;
+function finish(){
+    contentEl.textContent='完成一轮 🎉';
+    groupEl.textContent='';
+    updateProgress();
+}
+
+function updateProgress(){
+    const left = cards.filter(c=>!c.done).length;
+    progressEl.textContent=`已完成 ${done} / ${cards.length} ｜ 剩余 ${left}`;
 }
 </script>
 
