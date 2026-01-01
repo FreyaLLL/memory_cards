@@ -1,0 +1,14 @@
+# Excel / WPS 临时文件
+.~*
+*.tmp
+
+# Office 文档
+*.docx
+*.xlsx
+
+# 备份文件
+backups/
+
+# macOS
+.DS_Store
+
